@@ -1,116 +1,86 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import Image from "next/image";
 import { preview } from "@/public/assets";
 import { Loader, FormField } from "@/components";
+import { downloadImage } from "@/utils";
 
 const Create = () => {
-  const [form, setForm] = useState({
-    prompt: "",
-    photo: "",
-  });
-  const { prompt, photo } = form;
+  const [prompt, setPrompt] = useState("");
+  const [file, setFile] = useState(null);
+  const [uploadedUrl, setUploadedUrl] = useState("");
+  const [loading, setLoading] = useState({ generating: false, uploading: false });
 
-  const [generatingImg, setGeneratingImg] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [url, setUrl] = useState("");
-  const [uploading, setUploading] = useState(false);
+  const inputFileRef = useRef(null);
 
-  const handleChange = (e) => {
-    if (!e || !e.target) {
-      console.error("Event object is not available");
-      return;
-    }
-    const { name, value } = e.target
-    setForm({ ...form, [name]: value });
+  const handleInputChange = (e) => {
+    const { name, value, files } = e.target;
+    if (name === "prompt") setPrompt(value);
+    if (files && files.length > 0) setFile(files[0]);
   };
 
-  const handleSurpriseMe = async () => {
+  const fetchRandomPrompt = async () => {
     try {
-      const response = await fetch(
-        "https://imagen-backend.onrender.com/random-prompt"
-      );
-      if (!response.ok) throw new Error("Failed to fetch prompt");
-
-      const { prompt } = await response.json();
-      setForm({ ...form, prompt });
+      const res = await fetch("https://imagen-backend.onrender.com/random-prompt");
+      if (!res.ok) throw new Error("Failed to fetch prompt");
+      const { prompt } = await res.json();
+      setPrompt(prompt);
     } catch (error) {
-      alert("Error: " + error.message);
+      alert(`Error: ${error.message}`);
     }
   };
 
   const generateImage = async () => {
-    if (prompt) {
-      try {
-        setGeneratingImg(true);
-        setLoading(true); // Set loading state
+    if (!prompt) return alert("Please provide a prompt");
 
-        const response = await fetch(
-          "https://imagen-backend.onrender.com/api/v1/dalle",
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({ prompt }),
-          }
-        );
+    try {
+      setLoading((prev) => ({ ...prev, generating: true }));
+      const res = await fetch("https://imagen-backend.onrender.com/api/v1/dalle", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt }),
+      });
 
-        const data = await response.json();
-        setForm({ ...form, photo: data.photo }); // Store the image URL or base64
-      } catch (err) {
-        alert("Error: " + err.message);
-      } finally {
-        setGeneratingImg(false);
-        setLoading(false); // Reset loading state
-      }
-    } else {
-      alert("Please provide a prompt");
+      if (!res.ok) throw new Error("Image generation failed");
+      const { file } = await res.json();
+      setFile(file);
+    } catch (error) {
+      alert(`Error: ${error.message}`);
+    } finally {
+      setLoading((prev) => ({ ...prev, generating: false }));
     }
   };
 
   const uploadFile = async () => {
+    if (!file) return alert("No image to upload");
+
     try {
-      if (!photo) throw new Error("No image generated to upload");
+      setLoading((prev) => ({ ...prev, uploading: true }));
+      const formData = new FormData();
+      formData.append("file", file);
 
-      setUploading(true);
-      const data = new FormData();
-      data.set("file", photo);
-      console.log(data.get('file'), "data set")
-      console.log(data.file, 'this is the data')
+      const res = await fetch("/api/files", { method: "POST", body: formData });
+      if (!res.ok) throw new Error("Upload failed");
 
-      const response = await fetch("/api/files", {
-        method: "POST",
-        body: "https://res.cloudinary.com/terieyenike/image/upload/v1723648082/oteri_eyenike_wvort6.png",
-      });
-
-      // Check if the response is OK, otherwise throw an error
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || "Upload failed");
-      }
-
-      const { signedUrl } = await response.json();
-      setUrl(signedUrl); // Set the signed URL from response
-
-    } catch (e) {
-      console.error("Upload Error:", e);
-      alert(`Error: ${e.message}`);
+      const { signedUrl } = await res.json();
+      setUploadedUrl(signedUrl);
+    } catch (error) {
+      console.error("Upload Error:", error);
+      alert(`Error: ${error.message}`);
     } finally {
-      setUploading(false);
+      setLoading((prev) => ({ ...prev, uploading: false }));
     }
   };
 
-
   return (
     <section className="max-w-7xl mx-auto">
-      <div>
+      <header>
         <h1 className="font-extrabold text-[#222328] text-[32px]">Create</h1>
         <p className="mt-2 text-[#666e75] text-[14px] max-w-[500px]">
           Generate an imaginative image through DALL-E AI
         </p>
-      </div>
+      </header>
 
       <div className="mt-16 max-w-3xl flex flex-col gap-5">
         <FormField
@@ -119,28 +89,22 @@ const Create = () => {
           name="prompt"
           placeholder="An Impressionist oil painting of sunflowers in a purple vase…"
           value={prompt}
-          handleChange={handleChange}
+          handleChange={handleInputChange}
           isSurpriseMe
-          handleSurpriseMe={handleSurpriseMe}
+          handleSurpriseMe={fetchRandomPrompt}
         />
 
-        <div className="relative bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 w-64 p-3 h-64 flex justify-center items-center">
-          {loading ? (
+        <div className="relative bg-gray-50 border border-gray-300 rounded-lg w-64 h-64 p-3 flex justify-center items-center">
+          {loading.generating ? (
             <Loader />
-          ) : photo ? (
-            <Image
-              src={photo}
-              alt={prompt}
-              layout="fill"
-              objectFit="contain"
-            />
+          ) : file ? (
+            <Image src={file} alt={prompt} layout="fill" objectFit="contain" />
           ) : (
             <Image
               width={192}
               height={192}
-              id="file"
               src={preview}
-              alt="preview"
+              alt="Preview"
               className="object-contain opacity-40"
             />
           )}
@@ -148,25 +112,38 @@ const Create = () => {
 
         <div className="mt-5 flex gap-5">
           <button
-            type="button"
             onClick={generateImage}
             className="text-white bg-green-700 rounded-md p-2"
           >
-            {generatingImg ? "Generating..." : "Generate"}
+            {loading.generating ? "Generating..." : "Generate"}
+          </button>
+
+          <button
+            onClick={() => downloadImage(file)}
+            className="bg-transparent border-none text-black"
+          >
+            Download
           </button>
         </div>
 
+        <input type="file" ref={inputFileRef} onChange={handleInputChange} />
+
         <div className="mt-5">
           <button
-            type="button"
             onClick={uploadFile}
-            disabled={uploading}
-            className="text-white bg-[#6469ff] font-medium rounded-md text-sm w-full sm:w-auto px-5 py-2.5 text-center"
+            disabled={loading.uploading}
+            className="text-white bg-[#6469ff] rounded-md px-5 py-2.5"
           >
-            {uploading ? "Uploading..." : "Upload Image"}
+            {loading.uploading ? "Uploading..." : "Upload Image"}
           </button>
-          {url && (
-            <a href={url} className="underline" target="_blank" rel="noopener noreferrer">
+
+          {uploadedUrl && (
+            <a
+              href={uploadedUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="underline"
+            >
               View Uploaded Image
             </a>
           )}
